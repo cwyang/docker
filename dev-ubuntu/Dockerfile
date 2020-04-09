@@ -3,33 +3,16 @@ FROM ubuntu:18.04
 
 RUN apt-get --yes update
 
+# tzdata
+RUN ln -sf /usr/share/zoneinfo/Asia/Seoul /etc/localtime
+ENV DEBIAN_FRONTEND=noninteractive
+
 # huge packages go first (for better cacheability)
-RUN apt-get install --yes emacs
-RUN apt-get install --yes bison ruby-dev
-RUN apt-get install --yes php-cgi
+RUN apt-get install --yes tzdata emacs-nox vim-nox
 
 # tools for building and testing
-RUN apt-get install --yes apache2-utils cmake cmake-data git memcached netcat-openbsd nghttp2-client redis-server wget sudo
-RUN apt-get install --yes libev-dev libc-ares-dev libnghttp2-dev libssl-dev libuv1-dev zlib1g-dev
-
-# clang-4.0 for fuzzing
-RUN apt-get install -y clang-4.0
-ENV PATH=/usr/lib/llvm-4.0/bin:$PATH
-
-# curl with http2 support
-RUN wget --no-verbose -O - https://curl.haxx.se/download/curl-7.57.0.tar.gz | tar xzf -
-RUN (cd curl-7.57.0 && ./configure --prefix=/usr/local --with-nghttp2 --disable-shared && make && sudo make install)
-
-ARG OPENSSL_URL="https://www.openssl.org/source/"
-
-# openssl 1.1.1
-ARG OPENSSL_VERSION="1.1.1c"
-ARG OPENSSL_SHA1="71b830a077276cbeccc994369538617a21bee808"
-RUN curl -O ${OPENSSL_URL}openssl-${OPENSSL_VERSION}.tar.gz
-RUN (echo "${OPENSSL_SHA1} openssl-${OPENSSL_VERSION}.tar.gz" | sha1sum -c - && tar xf openssl-${OPENSSL_VERSION}.tar.gz)
-RUN (cd openssl-${OPENSSL_VERSION} && \
-	./config --prefix=/opt/openssl-1.1.1 --openssldir=/opt/openssl-1.1.1 shared enable-ssl3 enable-ssl3-method enable-weak-ssl-ciphers && \
-	make -j $(nproc) && make -j install_sw install_ssldirs)
+RUN apt-get install --yes perl gdb openssl ssh wget curl sudo telnet
+RUN apt-get install --yes iptables netcat-openbsd net-tools binutils dnsutils iputils-ping
 
 # use dumb-init
 RUN wget -O /usr/local/bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/v1.2.1/dumb-init_1.2.1_amd64 \
@@ -42,3 +25,4 @@ WORKDIR /home/cwyang
 USER cwyang
 
 ENTRYPOINT ["/usr/local/bin/dumb-init"]
+CMD ["/bin/bash"]
