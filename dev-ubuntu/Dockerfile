@@ -12,7 +12,7 @@ RUN apt-get install --yes tzdata emacs-nox vim-nox
 
 # tools for building and testing
 RUN apt-get install --yes perl gdb openssl ssh wget curl sudo telnet
-RUN apt-get install --yes iptables netcat-openbsd net-tools binutils dnsutils iputils-ping
+RUN apt-get install --yes iproute2 iptables netcat-openbsd net-tools binutils dnsutils iputils-ping
 
 # use dumb-init
 RUN wget -O /usr/local/bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/v1.2.1/dumb-init_1.2.1_amd64 \
