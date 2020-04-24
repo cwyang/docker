@@ -36,12 +36,14 @@
 # ip route: (100) default via 10.10.1.1 dev client-veth0
 
 use strict;
+use Carp;
 
 my $debug=1;
 my $dryrun=1;
 my $ip="ip";
 my $iptables="iptables";
 my $nic_name="veth0";
+my $nic_internet;
 
 sub run_cmd {
     my $cmd = shift;
@@ -53,8 +55,8 @@ sub run_cmd {
     }
 }
 sub iptables {
-    my $arg = shift;
-    if ($arg =~ /-A\b/) {
+    my ($arg, $opt) = @_;
+    if (!$opt && $arg =~ /-A\b/) {
 	(my $del_arg = $arg) =~ s/-A\b/-D/;
 	run_cmd("$iptables $del_arg");
     }
@@ -102,13 +104,12 @@ sub route_setup {
     my $nic_client="client-veth0";
     my $nic_p1 ="p1-veth0";
     my $nic_p2 ="p2-veth0";
-    my $nic_internet="enp4s0";
 
     if ($debug) {
 	# we need to do following things like to enable netfliter logging
-	iptables("-A PREROUTING -t raw -j TRACE");
-	system "sysctl -w net.netfilter.nf_log_all_netns=1";
-	system "sysctl -w net.netfilter.nf_log.2=nf_log_ipv4";
+	#iptables("-A PREROUTING -t raw -j TRACE");
+	#system "sysctl -w net.netfilter.nf_log_all_netns=1";
+	#system "sysctl -w net.netfilter.nf_log.2=nf_log_ipv4";
 	#	system "sysctl -w net.netfilter.nf_log.2=nfnetlink_log";
     }
     # flush
@@ -147,12 +148,38 @@ sub route_setup {
     iptables("-A PREROUTING -t raw -i $nic_p1 -d $net_client -j CT --zone 1");
     iptables("-A PREROUTING -t raw -i $nic_p1 -s $net_client -j CT --zone 2");
     iptables("-A PREROUTING -t raw -i $nic_p2 -d $net_client -j CT --zone 2");
+
+    # forward rule
+    # for work in strict firewall machine
+    iptables("-t filter -N YLINUX");
+    iptables("-t filter -D FORWARD -j YLINUX"); 
+    iptables("-t filter -I FORWARD 1 -j YLINUX"); 
+    iptables("-t filter -F YLINUX");
+    iptables("-t filter -A YLINUX -i $nic_client -o $nic_p1 -j ACCEPT", "raw");
+    iptables("-t filter -A YLINUX -o $nic_client -i $nic_p1 -j ACCEPT", "raw");
+    iptables("-t filter -A YLINUX -i $nic_p1 -o $nic_p2 -j ACCEPT", "raw");
+    iptables("-t filter -A YLINUX -o $nic_p1 -i $nic_p2 -j ACCEPT", "raw");
+    iptables("-t filter -A YLINUX -i $nic_p2 -o $nic_internet -j ACCEPT", "raw");
+    iptables("-t filter -A YLINUX -o $nic_p2 -i $nic_internet -j ACCEPT", "raw");
 }
+
+sub dns_setup {
+    for my $i (@_) {
+	my $path = "/etc/netns/$i";
+	system("mkdir -m 644 -p $path")
+	    && die "Error: cannot mkdir $path\n";
+	system("echo \"nameserver 8.8.8.8\" > $path/resolv.conf")
+	    && die "Error: cannot make $path/resolv.conf\n"
+    }
+}
+
+$nic_internet = shift or croak "usage: $0 DEFAULT_NIC_NAME\n";
 
 if (1) {
     make_ns("client", "10.10.1.1/24", "10.10.1.2/24");
     make_ns("p1",  "10.10.2.1/24", "10.10.2.2/24");
     make_ns("p2",  "10.10.3.1/24", "10.10.3.2/24");
     route_setup();
+    dns_setup("client", "p1", "p2");
 }
 
