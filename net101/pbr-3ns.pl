@@ -44,23 +44,28 @@ my $ip="ip";
 my $iptables="iptables";
 my $nic_name="veth0";
 my $nic_internet;
+my $proxy_port="8081";
 
 sub run_cmd {
     my $cmd = shift;
     print "$cmd\n" if ($debug);
     return if ($dryrun);
-    my $result = system("$cmd > /dev/null");
+    my $result = system("$cmd");
     if ($result != 0) {
 	print "  Error: ($result) $cmd \n";
     }
 }
 sub iptables {
-    my ($arg, $opt) = @_;
-    if (!$opt && $arg =~ /-A\b/) {
-	(my $del_arg = $arg) =~ s/-A\b/-D/;
-	run_cmd("$iptables $del_arg");
+    my ($arg, $opt_ref) = @_;
+    my $cmd = $iptables;
+    if ($opt_ref->{ns}) {
+	$cmd = "$ip netns exec $opt_ref->{ns} $iptables";
     }
-    run_cmd("$iptables $arg");
+    if (!$opt_ref->{raw} && $arg =~ /-A\b/) {
+	(my $del_arg = $arg) =~ s/-A\b/-D/;
+	run_cmd("$cmd $del_arg");
+    }
+    run_cmd("$cmd $arg");
 }
 sub ip {
     my $ns = shift if (@_ >= 3);
@@ -93,6 +98,19 @@ sub make_ns {
     ip($target, "link", "set $nic_name up");
     ip($target, "link", "set lo up");
     ip($target, "route", "add default via $host dev $nic_name");
+    # tproxy setup
+    ip($target, "rule", "add fwmark 1 lookup 100");
+    ip($target, "route", "add local 0.0.0.0/0 dev lo table 100");
+    iptables("-t mangle -N DIVERT",
+	     { ns => $target });
+    iptables("-t mangle -A DIVERT -j MARK --set-mark 1",
+	     { ns => $target });
+    iptables("-t mangle -A DIVERT -j ACCEPT",
+	     { ns => $target });
+    iptables("-t mangle -A PREROUTING -p tcp -m socket -j DIVERT ",
+	     { ns => $target });
+    iptables("-t mangle -A PREROUTING -p tcp --dport 443 -j TPROXY --tproxy-mark 0x1/0x1 --on-port $proxy_port",
+	     { ns => $target });
 }
 sub route_setup {
     my $net_client = "10.10.1.0/24";
@@ -155,21 +173,19 @@ sub route_setup {
     iptables("-t filter -D FORWARD -j YLINUX"); 
     iptables("-t filter -I FORWARD 1 -j YLINUX"); 
     iptables("-t filter -F YLINUX");
-    iptables("-t filter -A YLINUX -i $nic_client -o $nic_p1 -j ACCEPT", "raw");
-    iptables("-t filter -A YLINUX -o $nic_client -i $nic_p1 -j ACCEPT", "raw");
-    iptables("-t filter -A YLINUX -i $nic_p1 -o $nic_p2 -j ACCEPT", "raw");
-    iptables("-t filter -A YLINUX -o $nic_p1 -i $nic_p2 -j ACCEPT", "raw");
-    iptables("-t filter -A YLINUX -i $nic_p2 -o $nic_internet -j ACCEPT", "raw");
-    iptables("-t filter -A YLINUX -o $nic_p2 -i $nic_internet -j ACCEPT", "raw");
+    iptables("-t filter -A YLINUX -i $nic_client -o $nic_p1 -j ACCEPT", { raw => 1 });
+    iptables("-t filter -A YLINUX -o $nic_client -i $nic_p1 -j ACCEPT", { raw => 1 });
+    iptables("-t filter -A YLINUX -i $nic_p1 -o $nic_p2 -j ACCEPT", { raw => 1 });
+    iptables("-t filter -A YLINUX -o $nic_p1 -i $nic_p2 -j ACCEPT", { raw => 1 });
+    iptables("-t filter -A YLINUX -i $nic_p2 -o $nic_internet -j ACCEPT", { raw => 1 });
+    iptables("-t filter -A YLINUX -o $nic_p2 -i $nic_internet -j ACCEPT", { raw => 1 });
 }
 
 sub dns_setup {
     for my $i (@_) {
 	my $path = "/etc/netns/$i";
-	system("mkdir -m 644 -p $path")
-	    && die "Error: cannot mkdir $path\n";
-	system("echo \"nameserver 8.8.8.8\" > $path/resolv.conf")
-	    && die "Error: cannot make $path/resolv.conf\n"
+	run_cmd("mkdir -m 644 -p $path");
+	run_cmd("echo \"nameserver 8.8.8.8\" > $path/resolv.conf");
     }
 }
 
